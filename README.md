@@ -14,8 +14,11 @@ ALL linux Distros
 Usage:
 
 sudo apt install python3
+
 git clone https://github.com/legion1318/Time-Mate.git 
+
 cd Time-Mate
+
 python3 timemate.py
 
 
