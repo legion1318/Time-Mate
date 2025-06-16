@@ -1,248 +1,133 @@
-import tkinter as tk
-from time import strftime
-from datetime import datetime
-import threading
-import random
-import sys
-import os
+# --- Scrollable Frame with mouse wheel support and red scrollbar ---
+class ScrollableFrame(tk.Frame):
+    def __init__(self, container, *args, **kwargs):
+        super().__init__(container, *args, **kwargs)
+        self.canvas = tk.Canvas(self, bg='black', highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        # Style scrollbar - red color
+        self.scrollbar.config(bg='red', troughcolor='black', activebackground='darkred')
+        
+        self.scrollable_frame = tk.Frame(self.canvas, bg='black')
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-try:
-    from playsound import playsound
-    PLAY_SOUND_AVAILABLE = True
-except ImportError:
-    PLAY_SOUND_AVAILABLE = False
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
 
-# === Main Window Setup ===
-root = tk.Tk()
-root.title("Clock")
-root.configure(bg="black")
-root.update_idletasks()
+        # Bind mouse wheel for Windows and Mac
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        # For Linux
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-try:
-    root.attributes('-zoomed', True)
-except Exception:
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    root.geometry(f"{screen_width-20}x{screen_height-50}+0+0")
+    def _on_mousewheel(self, event):
+        # Windows / MacOS
+        if event.num == 4 or event.delta > 0:
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5 or event.delta < 0:
+            self.canvas.yview_scroll(1, "units")
 
-# === Layout Frames ===
-main_container = tk.Frame(root, bg="black")
-main_container.pack(expand=True, fill="both")
+# --- World Clock Frame ---
+worldclock_frame = tk.Frame(content_frame, bg="black")
 
-content_frame = tk.Frame(main_container, bg="black")
-content_frame.pack(side="left", expand=True, fill="both")
+timezone_labels = {}
+region_frames = {}  # Hold frames for each region to hide/show on search
 
-button_panel = tk.Frame(main_container, bg="#111111", width=180)
-button_panel.pack(side="right", fill="y", padx=5, pady=5)
+regions = {
+    "Africa": [tz for tz in pytz.all_timezones if tz.startswith("Africa/")],
+    "America": [tz for tz in pytz.all_timezones if tz.startswith("America/")],
+    "Antarctica": [tz for tz in pytz.all_timezones if tz.startswith("Antarctica/")],
+    "Asia": [tz for tz in pytz.all_timezones if tz.startswith("Asia/")],
+    "Atlantic": [tz for tz in pytz.all_timezones if tz.startswith("Atlantic/")],
+    "Australia": [tz for tz in pytz.all_timezones if tz.startswith("Australia/")],
+    "Europe": [tz for tz in pytz.all_timezones if tz.startswith("Europe/")],
+    "Indian": [tz for tz in pytz.all_timezones if tz.startswith("Indian/")],
+    "Pacific": [tz for tz in pytz.all_timezones if tz.startswith("Pacific/")],
+}
 
-# === App Content Frames ===
-clock_frame = tk.Frame(content_frame, bg="black")
-alarm_frame = tk.Frame(content_frame, bg="black")
-stopwatch_frame = tk.Frame(content_frame, bg="black")
-calendar_frame = tk.Frame(content_frame, bg="black")
+for region in regions:
+    regions[region].sort()
 
-# === Clock Frame Widgets ===
-center_frame = tk.Frame(clock_frame, bg="black")
-center_frame.pack(expand=True)
+# --- Search Bar ---
+search_var = tk.StringVar()
 
-label_time = tk.Label(center_frame, font=('Helvetica', 60, 'bold'), bg='black', fg='orange')
-label_time.pack()
-
-label_date = tk.Label(center_frame, font=('Helvetica', 35), bg='black', fg='white')
-label_date.pack(pady=(96, 0))  # 1 inch below time
-
-# === Stopwatch Placeholder ===
-stopwatch_label = tk.Label(stopwatch_frame, text="Stopwatch Screen (Coming Soon)", font=('Helvetica', 30), bg='black', fg='lime')
-stopwatch_label.pack(pady=50)
-
-# === Calendar Placeholder ===
-calendar_label = tk.Label(calendar_frame, text="Calendar Screen (Coming Soon)", font=('Helvetica', 30), bg='black', fg='magenta')
-calendar_label.pack(pady=50)
-
-# === Switch View Function ===
-def show_frame(frame_to_show):
-    for frame in (clock_frame, alarm_frame, stopwatch_frame, calendar_frame):
-        frame.pack_forget()
-    frame_to_show.pack(expand=True, fill="both")
-
-show_frame(clock_frame)
-
-# === Fancy Button Class ===
-class FancyButton(tk.Canvas):
-    def __init__(self, master, text, command=None, width=160, height=50,
-                 bg1="#ff6e40", bg2="#ff3d00", fg="white",
-                 font=('Helvetica', 14, 'bold'), radius=20, **kwargs):
-        super().__init__(master, width=width, height=height, bg=master['bg'],
-                         highlightthickness=0, **kwargs)
-        self.command = command
-        self.radius = radius
-        self.width = width
-        self.height = height
-        self.bg1 = bg1
-        self.bg2 = bg2
-        self.fg = fg
-        self.font = font
-        self.text = text
-        self.current_color = self.bg1
-        self.draw_button(self.bg1)
-        self.bind("<Enter>", self.on_enter)
-        self.bind("<Leave>", self.on_leave)
-        self.bind("<Button-1>", self.on_click)
-
-    def draw_button(self, color):
-        self.current_color = color
-        self.delete("all")
-        self.create_arc((0, 0, 2*self.radius, self.height), start=90, extent=180,
-                        fill=color, outline=color, tags="button_shape")
-        self.create_arc((self.width - 2*self.radius, 0, self.width, self.height),
-                        start=270, extent=180, fill=color, outline=color, tags="button_shape")
-        self.create_rectangle(self.radius, 0, self.width - self.radius, self.height,
-                              fill=color, outline=color, tags="button_shape")
-        self.create_text(self.width//2, self.height//2, text=self.text,
-                         fill=self.fg, font=self.font, tags="button_text")
-
-    def on_enter(self, event):
-        self.draw_button(self.bg2)
-        self.itemconfig("button_text", fill="#fffbcf")
-
-    def on_leave(self, event):
-        self.draw_button(self.bg1)
-        self.itemconfig("button_text", fill=self.fg)
-
-    def on_click(self, event):
-        if self.command:
-            self.command()
-
-# === Create Buttons ===
-btn_clock = FancyButton(button_panel, "Clock", command=lambda: show_frame(clock_frame))
-btn_clock.pack(pady=10)
-
-btn_alarm = FancyButton(button_panel, "Alarm", command=lambda: show_frame(alarm_frame),
-                        bg1="#40c4ff", bg2="#0091ea")
-btn_alarm.pack(pady=10)
-
-btn_stopwatch = FancyButton(button_panel, "Stopwatch", command=lambda: show_frame(stopwatch_frame),
-                            bg1="#69f0ae", bg2="#00c853", fg="black")
-btn_stopwatch.pack(pady=10)
-
-btn_calendar = FancyButton(button_panel, "Calendar", command=lambda: show_frame(calendar_frame),
-                           bg1="#ea40ff", bg2="#9c27b0")
-btn_calendar.pack(pady=10)
-
-# === Time and Date Functions ===
-def update_time():
-    current_time = strftime('%I:%M:%S %p')
-    label_time.config(text=current_time)
-    label_time.after(1000, update_time)
-
-def update_date():
-    current_date = datetime.now().strftime('%d %B %Y')
-    label_date.config(text=current_date)
-
-update_time()
-update_date()
-
-# === Alarm Section ===
-quotes = [
-    "Push yourself, because no one else will.",
-    "Don't watch the clock; do what it does. Keep going.",
-    "Success doesn’t find you — you hunt it down.",
-    "Stay positive, work hard, make it happen.",
-    "Discipline is choosing between what you want now and what you want most."
-]
-
-alarm_time = None
-alarm_triggered = False
-
-def play_alarm_sound():
-    if PLAY_SOUND_AVAILABLE:
-        sound_path = os.path.join(os.path.dirname(__file__), "alarm.wav")
-        if os.path.exists(sound_path):
-            playsound(sound_path)
+def on_search(*args):
+    query = search_var.get().strip().lower()
+    for region, frame in region_frames.items():
+        # Show/hide region based on if any child matches search
+        region_match = region.lower().find(query) != -1 if query else True
+        any_visible = False
+        for child in frame.winfo_children():
+            if isinstance(child, tk.Frame):  # Timezone frames
+                tz_name = child.tz_name.lower()
+                # Match if query is in tz_name or in region name
+                visible = (query in tz_name) or region_match or query == ""
+                if visible:
+                    child.pack(fill='x')
+                    any_visible = True
+                else:
+                    child.pack_forget()
+            elif isinstance(child, tk.Label) and child == region_frames[region].region_label:
+                # Region label - show only if any timezone visible or region match
+                child.pack_forget()  # We'll pack again below
+        if any_visible or region_match:
+            region_frames[region].region_label.pack(fill='x', pady=(10, 5))
+            frame.pack(fill='x')
         else:
-            print("alarm.wav not found, playing bell sound instead.")
-            print('\a')
-    else:
-        print('\a')
+            frame.pack_forget()
 
-def check_alarm():
-    global alarm_triggered
-    if alarm_time and not alarm_triggered:
-        now = datetime.now().strftime("%I:%M:%S %p")
-        if now == alarm_time:
-            alarm_triggered = True
-            threading.Thread(target=play_alarm_sound).start()
-            show_quote()
-    root.after(1000, check_alarm)
+# Search input UI
+search_frame = tk.Frame(worldclock_frame, bg='black')
+search_frame.pack(fill='x', pady=5, padx=10)
 
-def show_quote():
-    quote = random.choice(quotes)
-    top = tk.Toplevel(alarm_frame)
-    top.configure(bg="black")
-    top.geometry("400x200")
-    top.title("Motivational Quote")
-    tk.Label(top, text=quote, font=('Helvetica', 16, 'bold'), fg='cyan', bg='black', wraplength=380, justify='center').pack(expand=True, padx=20, pady=20)
-    tk.Button(top, text="Close", command=top.destroy, bg="#40c4ff", fg="black", font=('Helvetica', 12, 'bold')).pack(pady=10)
+search_label = tk.Label(search_frame, text="Search:", font=('Helvetica', 20), fg='cyan', bg='black')
+search_label.pack(side='left')
 
-def set_alarm():
-    global alarm_time, alarm_triggered
-    h = hour_var.get()
-    m = minute_var.get()
-    s = second_var.get()
-    ampm = ampm_var.get()
-    alarm_time = f"{int(h):02d}:{int(m):02d}:{int(s):02d} {ampm}"
-    alarm_label.config(text=f"Alarm set for {alarm_time}")
-    alarm_triggered = False
+search_entry = tk.Entry(search_frame, textvariable=search_var, font=('Helvetica', 18), bg='black', fg='orange', insertbackground='orange')
+search_entry.pack(side='left', fill='x', expand=True, padx=10)
+search_var.trace_add('write', on_search)
 
-def create_spinbox(parent, from_, to_, textvariable, width=3):
-    return tk.Spinbox(parent, from_=from_, to=to_, wrap=True, textvariable=textvariable, width=width,
-                      font=('Helvetica', 32, 'bold'), state='readonly', justify='center',
-                      bg='black', fg='orange', buttonbackground='#ff6e40', relief='flat')
+# Scrollable container for world clock entries
+scroll_container = ScrollableFrame(worldclock_frame)
+scroll_container.pack(fill='both', expand=True, padx=10, pady=10)
 
-# Clear previous alarm frame widgets
-for widget in alarm_frame.winfo_children():
-    widget.destroy()
+# Create region frames and populate timezones
+for region, tz_list in regions.items():
+    # Frame to hold this region's entries
+    region_frame = tk.Frame(scroll_container.scrollable_frame, bg='black')
+    region_frame.pack(fill='x')
+    region_frame.region_label = tk.Label(region_frame, text=region, font=('Helvetica', 26, 'bold', 'underline'),
+                                         fg='cyan', bg='black', anchor='w')
+    region_frame.region_label.pack(fill='x', pady=(10, 5))
 
-# Center container for alarm UI with some padding & bigger size
-alarm_center = tk.Frame(alarm_frame, bg="black")
-alarm_center.place(relx=0.5, rely=0.5, anchor='center')
+    for tz_name in tz_list:
+        frame = tk.Frame(region_frame, bg='black', pady=2)
+        frame.pack(fill='x')
+        frame.tz_name = tz_name
 
-tk.Label(alarm_center, text="Set Alarm Time", font=('Helvetica', 36, 'bold'), fg='cyan', bg='black').pack(pady=20)
+        label_name = tk.Label(frame, text=tz_name.replace('_', ' '), font=('Helvetica', 18, 'bold'),
+                              fg='orange', bg='black', anchor='w')
+        label_name.pack(side='left', padx=10, fill='x', expand=True)
 
-time_picker_frame = tk.Frame(alarm_center, bg="black")
-time_picker_frame.pack(pady=20)
+        label_time = tk.Label(frame, text="", font=('Helvetica', 16),
+                              fg='white', bg='black', anchor='e')
+        label_time.pack(side='right', padx=10)
 
-hour_var = tk.StringVar(value="12")
-minute_var = tk.StringVar(value="00")
-second_var = tk.StringVar(value="00")
-ampm_var = tk.StringVar(value="AM")
+        timezone_labels[tz_name] = {'name': label_name, 'time': label_time}
 
-hour_spinbox = create_spinbox(time_picker_frame, 1, 12, hour_var)
-hour_spinbox.grid(row=0, column=0, padx=(0,10))
+    region_frames[region] = region_frame
 
-tk.Label(time_picker_frame, text=":", font=('Helvetica', 36, 'bold'), fg='orange', bg='black').grid(row=0, column=1)
+def update_worldclock_times():
+    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+    for tz_name, labels in timezone_labels.items():
+        tz = pytz.timezone(tz_name)
+        local_time = now_utc.astimezone(tz)
+        formatted_time = local_time.strftime('%I:%M:%S %p')  # 12-hour format with AM/PM
+        labels['time'].config(text=formatted_time)
+    worldclock_frame.after(1000, update_worldclock_times)
 
-minute_spinbox = create_spinbox(time_picker_frame, 0, 59, minute_var)
-minute_spinbox.grid(row=0, column=2, padx=10)
-
-tk.Label(time_picker_frame, text=":", font=('Helvetica', 36, 'bold'), fg='orange', bg='black').grid(row=0, column=3)
-
-second_spinbox = create_spinbox(time_picker_frame, 0, 59, second_var)
-second_spinbox.grid(row=0, column=4, padx=(10,20))
-
-ampm_spinbox = tk.Spinbox(time_picker_frame, values=("AM", "PM"), textvariable=ampm_var, width=5,
-                          font=('Helvetica', 32, 'bold'), state='readonly', justify='center',
-                          bg='black', fg='orange', buttonbackground='#ff6e40', relief='flat')
-ampm_spinbox.grid(row=0, column=5)
-
-set_btn = tk.Button(alarm_center, text="Set Alarm", command=set_alarm, font=('Helvetica', 24, 'bold'), bg="#40c4ff", fg="black", width=15)
-set_btn.pack(pady=30)
-
-alarm_label = tk.Label(alarm_center, text="No alarm set", font=('Helvetica', 22), fg='white', bg='black')
-alarm_label.pack()
-
-root.after(1000, check_alarm)
-
-# === Start App ===
-root.mainloop()
-
+update_worldclock_times()
