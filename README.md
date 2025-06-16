@@ -1,6 +1,6 @@
 # Time-Mate
 
-Time mate is a python based app designed for linux which has Clock, Calendar, Stop watch, Timer and Alarm 
+Time mate is a python based app designed for linux which has Clock, Calendar, Stop watch, World Clock and Alarm 
 all these sections in one repo and under your fingertips so you dont have to worry about roaming in your OS settings
 
 Python Based
@@ -22,6 +22,8 @@ sudo apt install python3
 git clone https://github.com/legion1318/Time-Mate.git 
 
 cd Time-Mate
+
+pip install pytz
 
 python3 timemate.py
 
