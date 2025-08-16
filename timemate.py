@@ -154,10 +154,6 @@ tk.Button(sw_buttons, text="Reset", command=reset_stopwatch,
 # ======================================================
 # 5. CALENDAR
 # ======================================================
- 
- # ======================================================
-# 5. CALENDAR (Responsive grid + scroll support)
-# ======================================================
 
 def render_calendar(year, month):
     """Draw month view calendar inside scrollable frame."""
