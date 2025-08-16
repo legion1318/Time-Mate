@@ -154,27 +154,36 @@ tk.Button(sw_buttons, text="Reset", command=reset_stopwatch,
 # ======================================================
 # 5. CALENDAR
 # ======================================================
+ 
+ # ======================================================
+# 5. CALENDAR (Responsive grid + scroll support)
+# ======================================================
 
 def render_calendar(year, month):
-    """Draw month view calendar (very minimal)."""
-    for widget in calendar_content.winfo_children():
+    """Draw month view calendar inside scrollable frame."""
+    for widget in scrollable_frame.winfo_children():
         widget.destroy()
 
     cal = calendar.monthcalendar(year, month)
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+    # Configure columns to expand equally
+    for i in range(len(days)):
+        scrollable_frame.grid_columnconfigure(i, weight=1)
+
     # Day headers
     for i, day in enumerate(days):
-        tk.Label(calendar_content, text=day, font=('Helvetica', 22, 'bold'),
-                 bg='black', fg='cyan', width=8, height=2,
-                 borderwidth=1, relief='solid').grid(row=0, column=i, padx=3, pady=3)
+        tk.Label(scrollable_frame, text=day, font=('Helvetica', 18, 'bold'),
+                 bg='black', fg='cyan', borderwidth=1, relief='solid').grid(
+            row=0, column=i, padx=2, pady=2, sticky="nsew")
 
-    # Days
+    # Dates
     for r, week in enumerate(cal):
         for c, day in enumerate(week):
-            tk.Label(calendar_content, text=(day if day else ""), font=('Helvetica', 20),
-                     bg='black', fg='white', width=8, height=3,
-                     borderwidth=1, relief='solid').grid(row=r+1, column=c, padx=3, pady=3)
+            tk.Label(scrollable_frame, text=(day if day else ""), font=('Helvetica', 16),
+                     bg='black', fg='white', borderwidth=1, relief='solid').grid(
+                row=r+1, column=c, padx=2, pady=2, sticky="nsew")
+
 
 def update_calendar(*args):
     """When user changes month/year -> refresh view."""
@@ -182,26 +191,57 @@ def update_calendar(*args):
     month = month_names.index(month_var.get()) + 1
     render_calendar(year, month)
 
+
 # Calendar header (month + year controls)
 calendar_header = tk.Frame(calendar_view, bg="black")
-calendar_header.pack(pady=32)
+calendar_header.pack(pady=10)
 
 month_names = list(calendar.month_name)[1:]
 month_var = tk.StringVar(value=month_names[datetime.now().month - 1])
 year_var = tk.StringVar(value=str(datetime.now().year))
 
 month_menu = tk.OptionMenu(calendar_header, month_var, *month_names, command=update_calendar)
-month_menu.config(font=('Helvetica', 18, 'bold'), bg='black', fg='orange', width=9, highlightthickness=0)
-month_menu["menu"].config(bg="black", fg="white", font=('Helvetica', 16))
-month_menu.pack(side="left", padx=18)
+month_menu.config(font=('Helvetica', 16, 'bold'), bg='black', fg='orange', width=9, highlightthickness=0)
+month_menu["menu"].config(bg="black", fg="white", font=('Helvetica', 14))
+month_menu.pack(side="left", padx=10)
 
 year_spin = tk.Spinbox(calendar_header, from_=1990, to=2999, textvariable=year_var,
-                       font=('Helvetica', 18, 'bold'), width=8, command=update_calendar,
+                       font=('Helvetica', 16, 'bold'), width=8, command=update_calendar,
                        bg="black", fg="orange", justify='center')
-year_spin.pack(side="left", padx=18)
+year_spin.pack(side="left", padx=10)
 
-calendar_content = tk.Frame(calendar_view, bg="black")
-calendar_content.pack()
+
+# Scrollable calendar area
+calendar_canvas = tk.Canvas(calendar_view, bg="black", highlightthickness=0)
+calendar_canvas.pack(side="left", fill="both", expand=True)
+
+scrollbar_y = tk.Scrollbar(calendar_view, orient="vertical", command=calendar_canvas.yview)
+scrollbar_y.pack(side="right", fill="y")
+
+scrollbar_x = tk.Scrollbar(calendar_view, orient="horizontal", command=calendar_canvas.xview)
+scrollbar_x.pack(side="bottom", fill="x")
+
+scrollable_frame = tk.Frame(calendar_canvas, bg="black")
+scrollable_window = calendar_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=APP_WIDTH-250)
+
+def on_configure(event):
+    calendar_canvas.configure(scrollregion=calendar_canvas.bbox("all"))
+
+scrollable_frame.bind("<Configure>", on_configure)
+calendar_canvas.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+
+
+# Enable mouse wheel scrolling
+def _on_mouse_wheel(event):
+    if event.state & 0x0001:  # Shift key → horizontal scroll
+        calendar_canvas.xview_scroll(-1 if event.delta > 0 else 1, "units")
+    else:
+        calendar_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+calendar_canvas.bind_all("<MouseWheel>", _on_mouse_wheel)   # Windows/macOS
+calendar_canvas.bind_all("<Button-4>", lambda e: calendar_canvas.yview_scroll(-1, "units"))  # Linux up
+calendar_canvas.bind_all("<Button-5>", lambda e: calendar_canvas.yview_scroll(1, "units"))   # Linux down
+
 
 # Show current month at start
 render_calendar(datetime.now().year, datetime.now().month)
